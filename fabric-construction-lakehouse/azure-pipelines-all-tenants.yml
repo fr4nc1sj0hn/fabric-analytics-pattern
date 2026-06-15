@@ -1,0 +1,282 @@
+﻿trigger: none
+
+parameters:
+- name: continueOnTenantFailure
+  type: boolean
+  default: false
+
+variables:
+- group: fabric-cicd-vars
+
+pool:
+  vmImage: 'windows-latest'
+
+stages:
+- stage: Build_DACPAC
+  displayName: "Build DACPAC"
+
+  jobs:
+  - job: Build
+    displayName: "Build SQL Project"
+
+    steps:
+    - task: NuGetToolInstaller@1
+      displayName: "Install NuGet"
+
+    - task: NuGetCommand@2
+      displayName: "Restore SQL Project"
+      inputs:
+        command: 'restore'
+        restoreSolution: 'fabric-tenant-dw.sqlproj'
+
+    - task: VSBuild@1
+      displayName: "Build DACPAC"
+      inputs:
+        solution: 'fabric-tenant-dw.sqlproj'
+        configuration: 'Release'
+
+    - task: PowerShell@2
+      displayName: "Stage DACPAC"
+      inputs:
+        targetType: inline
+        script: |
+          $ErrorActionPreference = "Stop"
+
+          $dacpac = Get-ChildItem `
+            -Path "$(Build.SourcesDirectory)" `
+            -Recurse `
+            -Filter "*.dacpac" |
+            Select-Object -First 1
+
+          if (-not $dacpac) {
+            throw "DACPAC not found after build"
+          }
+
+          Write-Host "DACPAC found: $($dacpac.FullName)"
+
+          Copy-Item `
+            -Path $dacpac.FullName `
+            -Destination "$(Build.ArtifactStagingDirectory)\fabric-tenant-dw.dacpac" `
+            -Force
+
+    - task: PublishPipelineArtifact@1
+      displayName: "Publish DACPAC Artifact"
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)'
+        artifact: 'dacpac'
+
+- stage: Provision_All_Tenants
+  displayName: "Provision All Fabric Tenants"
+  dependsOn: Build_DACPAC
+  condition: succeeded()
+
+  jobs:
+  - job: Deploy_All
+    displayName: "Deploy DACPAC to All Tenants"
+
+    steps:
+    - download: current
+      artifact: dacpac
+
+    - task: PowerShell@2
+      displayName: "Install SqlPackage"
+      inputs:
+        targetType: inline
+        script: |
+          $ErrorActionPreference = "Stop"
+
+          $sqlPackageZip = "$(Agent.TempDirectory)\sqlpackage.zip"
+          $sqlPackageDir = "$(Agent.TempDirectory)\sqlpackage"
+
+          Invoke-WebRequest `
+            -Uri "https://aka.ms/sqlpackage-windows" `
+            -OutFile $sqlPackageZip
+
+          Expand-Archive `
+            -Path $sqlPackageZip `
+            -DestinationPath $sqlPackageDir `
+            -Force
+
+          Write-Host "##vso[task.prependpath]$sqlPackageDir"
+          Write-Host "SqlPackage installed at $sqlPackageDir"
+
+    - task: PowerShell@2
+      displayName: "Discover Tenants from Fabric Lakehouse SQL Endpoint"
+      inputs:
+        targetType: inline
+        script: |
+          $ErrorActionPreference = "Stop"
+
+          $manifestDir = "$(Pipeline.Workspace)\tenant-manifest"
+          $manifestPath = "$manifestDir\tenants.json"
+
+          New-Item -ItemType Directory -Force -Path $manifestDir | Out-Null
+
+          Write-Host "Acquiring access token for Fabric SQL endpoint..."
+
+          $body = @{
+            client_id     = "$(clientId)"
+            client_secret = "$(clientSecret)"
+            scope         = "https://database.windows.net/.default"
+            grant_type    = "client_credentials"
+          }
+
+          $tokenResponse = Invoke-RestMethod `
+            -Method Post `
+            -Uri "https://login.microsoftonline.com/$(aadTenantId)/oauth2/v2.0/token" `
+            -Body $body `
+            -ContentType "application/x-www-form-urlencoded"
+
+          $accessToken = $tokenResponse.access_token
+
+          if (-not $accessToken) {
+            throw "Failed to acquire Azure AD access token"
+          }
+
+          $connectionString = "Server=tcp:$(registrySqlServer),1433;Database=$(registryDatabase);Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;"
+
+          $connection = New-Object System.Data.SqlClient.SqlConnection
+          $connection.ConnectionString = $connectionString
+          $connection.AccessToken = $accessToken
+
+          $command = $connection.CreateCommand()
+          $command.CommandText = @"
+          SELECT
+              TenantId,
+              ConnectionString
+          FROM control.tenant_info
+          WHERE IsActive = 1
+          ORDER BY TenantId;
+          "@
+
+          $tenants = @()
+
+          try {
+            $connection.Open()
+            $reader = $command.ExecuteReader()
+
+            while ($reader.Read()) {
+              $tenants += @{
+                tenantId = [string]$reader["TenantId"]
+                sqlServer = [string]$reader["ConnectionString"]
+                enabled = $true
+              }
+            }
+
+            $reader.Close()
+          }
+          finally {
+            if ($connection.State -ne "Closed") {
+              $connection.Close()
+            }
+          }
+
+          if ($tenants.Count -eq 0) {
+            throw "No enabled tenants found in Fabric registry Lakehouse"
+          }
+
+          @{
+            tenants = $tenants
+          } | ConvertTo-Json -Depth 10 | Set-Content -Path $manifestPath -Encoding UTF8
+
+          Write-Host "Discovered $($tenants.Count) tenants"
+          Write-Host "Tenant manifest written to $manifestPath"
+
+    - task: PowerShell@2
+      displayName: "Deploy DACPAC to All Tenants"
+      inputs:
+        targetType: inline
+        script: |
+          $ErrorActionPreference = "Stop"
+
+          $dacpacPath = "$(Pipeline.Workspace)\dacpac\fabric-tenant-dw.dacpac"
+          $tenantsPath = "$(Pipeline.Workspace)\tenant-manifest\tenants.json"
+
+          if (!(Test-Path $dacpacPath)) {
+            throw "DACPAC not found at $dacpacPath"
+          }
+
+          if (!(Test-Path $tenantsPath)) {
+            throw "Tenant manifest not found at $tenantsPath"
+          }
+
+          $manifest = Get-Content $tenantsPath -Raw | ConvertFrom-Json
+          $tenants = @($manifest.tenants | Where-Object { $_.enabled -ne $false })
+
+          if ($tenants.Count -eq 0) {
+            throw "No enabled tenants found in tenant manifest"
+          }
+
+          Write-Host "Acquiring access token for DACPAC deployment..."
+
+          $body = @{
+            client_id     = "$(clientId)"
+            client_secret = "$(clientSecret)"
+            scope         = "https://database.windows.net/.default"
+            grant_type    = "client_credentials"
+          }
+
+          $tokenResponse = Invoke-RestMethod `
+            -Method Post `
+            -Uri "https://login.microsoftonline.com/$(aadTenantId)/oauth2/v2.0/token" `
+            -Body $body `
+            -ContentType "application/x-www-form-urlencoded"
+
+          $accessToken = $tokenResponse.access_token
+
+          if (-not $accessToken) {
+            throw "Failed to acquire Azure AD access token"
+          }
+
+          $failedTenants = @()
+
+          foreach ($tenant in $tenants) {
+            $tenantId = [string]$tenant.tenantId
+            $sqlhost = [string]$tenant.sqlServer
+            $database = "dw_$tenantId"
+
+            if (-not $tenantId) {
+              throw "Tenant entry is missing tenantId"
+            }
+
+            if (-not $sqlhost) {
+              throw "Tenant '$tenantId' is missing sqlServer"
+            }
+
+            Write-Host "===================================="
+            Write-Host "Deploying tenant: $tenantId"
+            Write-Host "SQL Host: $sqlhost"
+            Write-Host "Database: $database"
+            Write-Host "===================================="
+
+            try {
+              SqlPackage `
+                /Action:Publish `
+                /SourceFile:$dacpacPath `
+                /TargetServerName:$sqlhost `
+                /TargetDatabaseName:$database `
+                /AccessToken:$accessToken
+
+              if ($LASTEXITCODE -ne 0) {
+                throw "SqlPackage failed with exit code $LASTEXITCODE"
+              }
+
+              Write-Host "Deployment completed for tenant: $tenantId"
+            }
+            catch {
+              Write-Host "Deployment failed for tenant: $tenantId"
+              Write-Host $_
+
+              $failedTenants += $tenantId
+
+              if ("${{ parameters.continueOnTenantFailure }}" -ne "True") {
+                throw
+              }
+            }
+          }
+
+          if ($failedTenants.Count -gt 0) {
+            throw "Deployment failed for tenants: $($failedTenants -join ', ')"
+          }
+
+          Write-Host "All tenant deployments completed"

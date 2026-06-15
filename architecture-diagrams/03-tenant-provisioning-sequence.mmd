@@ -1,0 +1,60 @@
+sequenceDiagram
+    autonumber
+    participant Operator as Platform operator / trigger
+    participant Pipe as Fabric provisioning pipeline
+    participant Config as Control-plane config
+    participant Fabric as Fabric REST APIs
+    participant Log as Logging service
+    participant DevOps as Azure DevOps pipeline
+    participant DW as Tenant Fabric warehouse
+    participant Registry as control.tenant_info
+
+    Operator->>Pipe: Submit tenant_id, tenant_name, capacity_id, environment
+    Pipe->>Config: Lookup SP_ClientID and DevOpsPipelineId
+    Config-->>Pipe: Environment configuration
+    Pipe->>Pipe: Set service_principal_id
+    Pipe->>Pipe: Set devops_provisioning_pipeline_id
+
+    Pipe->>Fabric: GET workspaces
+    Fabric-->>Pipe: Workspace list
+    Pipe->>Pipe: Filter for ws_{tenant}
+
+    alt Workspace exists
+        Pipe->>Pipe: Set workspaceId from existing workspace
+    else Workspace missing
+        Pipe->>Fabric: POST workspaces
+        Fabric-->>Pipe: New workspaceId
+        Pipe->>Fabric: POST workspace roleAssignments
+        Fabric-->>Pipe: Service principal added as Contributor
+        Pipe->>Log: WORKSPACE_CREATED
+    end
+
+    Pipe->>Fabric: GET workspaces/{workspaceId}/warehouses
+    Fabric-->>Pipe: Warehouse list
+    Pipe->>Pipe: Filter for dw_{tenant}
+
+    alt Warehouse exists
+        Pipe->>Pipe: Set warehouseId from existing warehouse
+    else Warehouse missing
+        Pipe->>Fabric: POST workspaces/{workspaceId}/warehouses
+        Fabric-->>Pipe: New warehouseId
+        Pipe->>Log: WAREHOUSE_CREATED
+    end
+
+    Pipe->>Fabric: GET warehouse connection string
+    Fabric-->>Pipe: SQL endpoint
+    Pipe->>DevOps: POST pipeline run with tenantId and sqlServer
+    DevOps->>DW: Deploy database project to tenant warehouse
+
+    loop Until Azure DevOps run state is completed
+        Pipe->>Pipe: Wait 30 seconds
+        Pipe->>DevOps: GET pipeline run status
+        DevOps-->>Pipe: state and result
+    end
+
+    alt Azure DevOps result is succeeded
+        Pipe->>Registry: Register tenant metadata
+        Pipe->>Log: TENANT_PROVISIONING_SUCCESS
+    else Azure DevOps result is failed or canceled
+        Pipe->>Log: TENANT_PROVISIONING_FAILED
+    end

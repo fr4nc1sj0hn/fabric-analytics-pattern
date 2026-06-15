@@ -1,0 +1,100 @@
+﻿trigger: none
+
+parameters:
+- name: sourceEnvironment
+  displayName: Promote from environment
+  type: string
+  default: DEV
+  values:
+  - DEV
+  - TEST
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+- group: fabric-cicd-vars
+
+stages:
+- stage: Promote_Fabric
+  displayName: "Deploy Fabric from ${{ parameters.sourceEnvironment }}"
+  jobs:
+  - job: TriggerFabricDeployment
+    displayName: "Trigger Fabric deployment pipeline"
+    steps:
+    - task: PowerShell@2
+      displayName: "Trigger Fabric Deployment Pipeline"
+      inputs:
+        targetType: 'inline'
+        script: |
+          Write-Host "Getting access token..."
+
+          $body = @{
+            client_id     = "$(clientId)"
+            client_secret = "$(clientSecret)"
+            grant_type    = "client_credentials"
+            scope         = "https://analysis.windows.net/powerbi/api/.default"
+          }
+
+          $tokenResponse = Invoke-RestMethod `
+            -Method Post `
+            -Uri "https://login.microsoftonline.com/$(AADtenantId)/oauth2/v2.0/token" `
+            -Body $body
+
+          $token = $tokenResponse.access_token
+
+          if (-not $token) {
+            throw "Failed to acquire Fabric API access token"
+          }
+
+          Write-Host "Token acquired"
+
+          $sourceEnvironment = "${{ parameters.sourceEnvironment }}".ToUpperInvariant()
+
+          if ($sourceEnvironment -eq "DEV") {
+            $targetEnvironment = "TEST"
+            $sourceStageId = "$(DevStageID)"
+            $targetStageId = "$(TestStageID)"
+          }
+          elseif ($sourceEnvironment -eq "TEST") {
+            $targetEnvironment = "PROD"
+            $sourceStageId = "$(TestStageID)"
+            $targetStageId = "$(ProdStageID)"
+          }
+          else {
+            throw "Unsupported sourceEnvironment '$sourceEnvironment'. Use DEV or TEST."
+          }
+
+          if (-not $sourceStageId) {
+            throw "Source stage ID is empty. Check DevStageID/TestStageID in fabric-cicd-vars."
+          }
+
+          if (-not $targetStageId) {
+            throw "Target stage ID is empty. Check TestStageID/ProdStageID in fabric-cicd-vars."
+          }
+
+          Write-Host "Triggering Fabric Deployment Pipeline..."
+          Write-Host "Source environment: $sourceEnvironment"
+          Write-Host "Target environment: $targetEnvironment"
+          Write-Host "Source stage ID: $sourceStageId"
+          Write-Host "Target stage ID: $targetStageId"
+
+          $deployBody = @{
+            sourceStageId = $sourceStageId
+            targetStageId = $targetStageId
+          } | ConvertTo-Json
+
+          $response = Invoke-RestMethod `
+            -Method Post `
+            -Uri "https://api.fabric.microsoft.com/v1/deploymentPipelines/$(pipelineId)/deploy" `
+            -Headers @{
+              Authorization = "Bearer $token"
+              "Content-Type" = "application/json"
+            } `
+            -Body $deployBody
+
+          Write-Host "Deployment triggered successfully"
+          Write-Host ($response | ConvertTo-Json -Depth 10)
+
+          $operationId = $response.id
+          Write-Host "Operation ID: $operationId"

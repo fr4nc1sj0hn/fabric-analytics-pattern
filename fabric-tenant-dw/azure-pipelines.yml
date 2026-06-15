@@ -1,0 +1,33 @@
+﻿trigger:
+- main
+
+pool:
+  vmImage: 'windows-latest'
+
+stages:
+
+- stage: Build_DACPAC
+  jobs:
+  - job: Build
+    steps:
+
+    # 1. Install NuGet tool
+    - task: NuGetToolInstaller@1
+
+    # 2. Restore dependencies (THIS FIXES YOUR ERROR)
+    - task: NuGetCommand@2
+      inputs:
+        command: 'restore'
+        restoreSolution: '**/*.sqlproj'
+
+    # 3. Build SQL project
+    - task: VSBuild@1
+      inputs:
+        solution: '**/*.sqlproj'
+        configuration: 'Release'
+
+    # 4. Publish DACPAC
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.SourcesDirectory)'
+        ArtifactName: 'dacpac'

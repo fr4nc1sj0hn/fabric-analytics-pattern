@@ -1,0 +1,60 @@
+flowchart TB
+    %% Workspace responsibility and isolation boundaries
+
+    Platform["Fabric analytics platform"]
+
+    subgraph Control["Control plane workspace"]
+        CP1["Tenant registry"]
+        CP2["Mapping and orchestration metadata"]
+        CP3["Provisioning pipeline"]
+        CP4["Operational governance"]
+    end
+
+    subgraph Shared["Shared execution workspaces"]
+        IH["ws-ingestion-hub<br/>raw landing and bronze ingestion"]
+        PH["ws-processing-hub<br/>shared silver processing"]
+    end
+
+    subgraph TenantA["Tenant A workspace"]
+        AWH["dw_tenantA"]
+        ASEM["Tenant A semantic/reporting layer"]
+    end
+
+    subgraph TenantB["Tenant B workspace"]
+        BWH["dw_tenantB"]
+        BSEM["Tenant B semantic/reporting layer"]
+    end
+
+    subgraph TenantN["Tenant N workspace"]
+        NWH["dw_tenantN"]
+        NSEM["Tenant N semantic/reporting layer"]
+    end
+
+    Platform --> Control
+    Platform --> Shared
+    Platform --> TenantA
+    Platform --> TenantB
+    Platform --> TenantN
+
+    CP1 --> PH
+    CP2 --> PH
+    CP3 --> TenantA
+    CP3 --> TenantB
+    CP3 --> TenantN
+
+    IH --> PH
+    PH --> AWH
+    PH --> BWH
+    PH --> NWH
+
+    AWH --> ASEM
+    BWH --> BSEM
+    NWH --> NSEM
+
+    classDef control fill:#e8f3ff,stroke:#2f70b7,color:#102a43
+    classDef shared fill:#eaf7ef,stroke:#2f855a,color:#102a43
+    classDef tenant fill:#fff4e6,stroke:#b7791f,color:#102a43
+
+    class CP1,CP2,CP3,CP4 control
+    class IH,PH shared
+    class AWH,ASEM,BWH,BSEM,NWH,NSEM tenant

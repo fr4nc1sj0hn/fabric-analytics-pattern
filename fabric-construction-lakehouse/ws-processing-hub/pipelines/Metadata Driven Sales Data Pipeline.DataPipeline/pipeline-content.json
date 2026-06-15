@@ -1,0 +1,562 @@
+﻿{
+  "properties": {
+    "activities": [
+      {
+        "name": "For each tables",
+        "type": "ForEach",
+        "dependsOn": [
+          {
+            "activity": "Table Mapping",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "typeProperties": {
+          "items": {
+            "value": "@activity('Table Mapping').output.value",
+            "type": "Expression"
+          },
+          "batchCount": 2,
+          "activities": [
+            {
+              "name": "bronze_to_silver",
+              "type": "TridentNotebook",
+              "dependsOn": [],
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureOutput": false,
+                "secureInput": false
+              },
+              "typeProperties": {
+                "notebookId": {
+                  "value": "@pipeline().parameters.notebook_id",
+                  "type": "Expression"
+                },
+                "workspaceId": {
+                  "value": "@pipeline().parameters.processing_workspaceid",
+                  "type": "Expression"
+                },
+                "parameters": {
+                  "tenant_id": {
+                    "value": {
+                      "value": "@pipeline().parameters.tenant_id",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  },
+                  "ingestion_date": {
+                    "value": {
+                      "value": "@pipeline().parameters.ingestion_date",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  },
+                  "source_table": {
+                    "value": {
+                      "value": "@item().source_table",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  },
+                  "target_table": {
+                    "value": {
+                      "value": "@item().silver_table",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  },
+                  "run_id": {
+                    "value": {
+                      "value": "@pipeline().RunId",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  },
+                  "warehouse_id": {
+                    "value": {
+                      "value": "@activity('Tenant Info').output.value[0].WarehouseId",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "Loop Silver Tables to Gold",
+        "type": "ForEach",
+        "dependsOn": [
+          {
+            "activity": "Silver Tables to Gold Mapping",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "typeProperties": {
+          "items": {
+            "value": "@activity('Silver Tables to Gold Mapping').output.value",
+            "type": "Expression"
+          },
+          "batchCount": 2,
+          "activities": [
+            {
+              "name": "Silver to Gold Staging",
+              "type": "Copy",
+              "dependsOn": [
+                {
+                  "activity": "Prepare Staging Tables",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ],
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureOutput": false,
+                "secureInput": false
+              },
+              "typeProperties": {
+                "source": {
+                  "type": "DataWarehouseSource",
+                  "sqlReaderQuery": {
+                    "value": "@concat(\n    'SELECT * FROM sales.',\n    item().silver_table,\n    ' WHERE tenant_id = ''',\n    pipeline().parameters.tenant_id,\n    ''''\n)",
+                    "type": "Expression"
+                  },
+                  "queryTimeout": "02:00:00",
+                  "partitionOption": "None",
+                  "datasetSettings": {
+                    "annotations": [],
+                    "connectionSettings": {
+                      "name": "00000000_0000_0000_0000_000000000000",
+                      "properties": {
+                        "annotations": [],
+                        "type": "DataWarehouse",
+                        "typeProperties": {
+                          "endpoint": "@pipeline().parameters.silver_sqlconnectionstring",
+                          "artifactId": "@pipeline().parameters.silver_wh_endpoint_id",
+                          "workspaceId": "@pipeline().parameters.processing_workspaceid"
+                        },
+                        "externalReferences": {
+                          "connection": "@pipeline().parameters.silver_connectionid"
+                        }
+                      }
+                    },
+                    "type": "DataWarehouseTable",
+                    "schema": [],
+                    "typeProperties": {}
+                  }
+                },
+                "sink": {
+                  "type": "DataWarehouseSink",
+                  "allowCopyCommand": true,
+                  "copyCommandSettings": {},
+                  "writeBehavior": "Insert",
+                  "tableOption": "autoCreate",
+                  "datasetSettings": {
+                    "annotations": [],
+                    "connectionSettings": {
+                      "name": "00000000_0000_0000_0000_000000000000",
+                      "properties": {
+                        "annotations": [],
+                        "type": "DataWarehouse",
+                        "typeProperties": {
+                          "endpoint": "@activity('Tenant Info').output.value[0].ConnectionString",
+                          "artifactId": "@activity('Tenant Info').output.value[0].WarehouseId",
+                          "workspaceId": "@activity('Tenant Info').output.value[0].WorkspaceId"
+                        },
+                        "externalReferences": {
+                          "connection": "@activity('Tenant Info').output.value[0].ConnectionId"
+                        }
+                      }
+                    },
+                    "type": "DataWarehouseTable",
+                    "schema": [],
+                    "typeProperties": {
+                      "schema": "reporting",
+                      "table": {
+                        "value": "@item().staging_gold_table",
+                        "type": "Expression"
+                      }
+                    }
+                  }
+                },
+                "enableStaging": true,
+                "translator": {
+                  "type": "TabularTranslator",
+                  "typeConversion": true,
+                  "typeConversionSettings": {
+                    "allowDataTruncation": true,
+                    "treatBooleanAsNumber": false
+                  }
+                }
+              }
+            },
+            {
+              "name": "usp_apply_scd_from_mapping",
+              "type": "SqlServerStoredProcedure",
+              "dependsOn": [
+                {
+                  "activity": "Silver to Gold Staging",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ],
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureOutput": false,
+                "secureInput": false
+              },
+              "typeProperties": {
+                "storedProcedureName": "[reporting].[usp_apply_scd_from_mapping]",
+                "storedProcedureParameters": {
+                  "Debug": {
+                    "value": "false",
+                    "type": "Boolean"
+                  },
+                  "MappingSchema": {
+                    "value": "reporting",
+                    "type": "String"
+                  },
+                  "MappingTable": {
+                    "value": "column_mapping",
+                    "type": "String"
+                  },
+                  "SourceSchema": {
+                    "value": "reporting",
+                    "type": "String"
+                  },
+                  "SourceTable": {
+                    "value": {
+                      "value": "@item().staging_gold_table",
+                      "type": "Expression"
+                    },
+                    "type": "String"
+                  },
+                  "TargetSchema": {
+                    "value": "reporting",
+                    "type": "String"
+                  },
+                  "TargetTable": {
+                    "value": {
+                      "value": "@item().gold_table",
+                      "type": "Expression"
+                    },
+                    "type": "String"
+                  }
+                }
+              },
+              "linkedService": {
+                "name": "00000000_0000_0000_0000_000000000000",
+                "properties": {
+                  "annotations": [],
+                  "type": "DataWarehouse",
+                  "typeProperties": {
+                    "endpoint": "@activity('Tenant Info').output.value[0].ConnectionString",
+                    "artifactId": "@activity('Tenant Info').output.value[0].WarehouseId",
+                    "workspaceId": "@activity('Tenant Info').output.value[0].WorkspaceId"
+                  }
+                }
+              }
+            },
+            {
+              "name": "Prepare Staging Tables",
+              "type": "Script",
+              "dependsOn": [],
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureOutput": false,
+                "secureInput": false
+              },
+              "connectionSettings": {
+                "name": "00000000_0000_0000_0000_000000000000",
+                "properties": {
+                  "annotations": [],
+                  "type": "DataWarehouse",
+                  "typeProperties": {
+                    "endpoint": "@activity('Tenant Info').output.value[0].ConnectionString",
+                    "artifactId": "@activity('Tenant Info').output.value[0].WarehouseId",
+                    "workspaceId": "@activity('Tenant Info').output.value[0].WorkspaceId"
+                  },
+                  "externalReferences": {
+                    "connection": "@activity('Tenant Info').output.value[0].ConnectionId"
+                  }
+                }
+              },
+              "typeProperties": {
+                "scripts": [
+                  {
+                    "type": "NonQuery",
+                    "text": {
+                      "value": "IF EXISTS (\n    SELECT 1\n    FROM INFORMATION_SCHEMA.TABLES\n    WHERE TABLE_SCHEMA = 'reporting'\n      AND TABLE_NAME = '@{item().staging_gold_table}'\n)\nBEGIN\n    EXEC(\n        'TRUNCATE TABLE reporting.' + '@{item().staging_gold_table}'\n    );\nEND;",
+                      "type": "Expression"
+                    }
+                  }
+                ],
+                "scriptBlockExecutionTimeout": "02:00:00"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "Tenant Info Table",
+        "type": "Lookup",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "source": {
+            "type": "LakehouseTableSource"
+          },
+          "firstRowOnly": false,
+          "datasetSettings": {
+            "annotations": [],
+            "linkedService": {
+              "name": "00000000_0000_0000_0000_000000000000",
+              "properties": {
+                "annotations": [],
+                "type": "Lakehouse",
+                "typeProperties": {
+                  "workspaceId": "@pipeline().parameters.core_workspaceid",
+                  "artifactId": "@pipeline().parameters.LakehouseId",
+                  "rootFolder": "Tables"
+                }
+              }
+            },
+            "type": "LakehouseTable",
+            "schema": [],
+            "typeProperties": {
+              "schema": "control",
+              "table": "tenant_info"
+            }
+          }
+        }
+      },
+      {
+        "name": "Tenant Info",
+        "type": "Filter",
+        "dependsOn": [
+          {
+            "activity": "Tenant Info Table",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "typeProperties": {
+          "items": {
+            "value": "@activity('Tenant Info Table').output.value",
+            "type": "Expression"
+          },
+          "condition": {
+            "value": "@equals(item().TenantId, pipeline().parameters.tenant_id)",
+            "type": "Expression"
+          }
+        }
+      },
+      {
+        "name": "Silver DQ Check",
+        "type": "TridentNotebook",
+        "dependsOn": [
+          {
+            "activity": "For each tables",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "notebookId": {
+            "value": "@pipeline().parameters.dq_notebook_id",
+            "type": "Expression"
+          },
+          "workspaceId": {
+            "value": "@pipeline().parameters.processing_workspaceid",
+            "type": "Expression"
+          },
+          "parameters": {
+            "tenantId": {
+              "value": {
+                "value": "@pipeline().parameters.tenant_id",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "runId": {
+              "value": {
+                "value": "@pipeline().RunId",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "Table Mapping",
+        "type": "Lookup",
+        "dependsOn": [
+          {
+            "activity": "Tenant Info",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "source": {
+            "type": "LakehouseTableSource"
+          },
+          "firstRowOnly": false,
+          "datasetSettings": {
+            "annotations": [],
+            "linkedService": {
+              "name": "00000000_0000_0000_0000_000000000000",
+              "properties": {
+                "annotations": [],
+                "type": "Lakehouse",
+                "typeProperties": {
+                  "workspaceId": "@pipeline().parameters.core_workspaceid",
+                  "artifactId": "@pipeline().parameters.LakehouseId",
+                  "rootFolder": "Tables"
+                }
+              }
+            },
+            "type": "LakehouseTable",
+            "schema": [],
+            "typeProperties": {
+              "schema": "metadata",
+              "table": "table_mapping"
+            }
+          }
+        }
+      },
+      {
+        "name": "Silver Tables to Gold Mapping",
+        "type": "Lookup",
+        "dependsOn": [
+          {
+            "activity": "Silver DQ Check",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "source": {
+            "type": "LakehouseTableSource"
+          },
+          "firstRowOnly": false,
+          "datasetSettings": {
+            "annotations": [],
+            "linkedService": {
+              "name": "00000000_0000_0000_0000_000000000000",
+              "properties": {
+                "annotations": [],
+                "type": "Lakehouse",
+                "typeProperties": {
+                  "workspaceId": "@pipeline().parameters.core_workspaceid",
+                  "artifactId": "@pipeline().parameters.LakehouseId",
+                  "rootFolder": "Tables"
+                }
+              }
+            },
+            "type": "LakehouseTable",
+            "schema": [],
+            "typeProperties": {
+              "schema": "metadata",
+              "table": "table_mapping"
+            }
+          }
+        }
+      }
+    ],
+    "concurrency": 1,
+    "parameters": {
+      "ingestion_date": {
+        "type": "string",
+        "defaultValue": "20260506"
+      },
+      "tenant_id": {
+        "type": "string",
+        "defaultValue": "tenant1"
+      },
+      "Environment": {
+        "type": "string",
+        "defaultValue": "DEV"
+      },
+      "LakehouseId": {
+        "type": "string",
+        "defaultValue": "00000000-0000-0000-0000-000000000000"
+      },
+      "core_workspaceid": {
+        "type": "string",
+        "defaultValue": "00000000-0000-0000-0000-000000000000"
+      },
+      "processing_workspaceid": {
+        "type": "string",
+        "defaultValue": "00000000-0000-0000-0000-000000000000"
+      },
+      "notebook_id": {
+        "type": "string",
+        "defaultValue": "00000000-0000-0000-0000-000000000000"
+      },
+      "dq_notebook_id": {
+        "type": "string",
+        "defaultValue": "00000000-0000-0000-0000-000000000000"
+      },
+      "silver_connectionid": {
+        "type": "string",
+        "defaultValue": "00000000-0000-0000-0000-000000000000"
+      },
+      "silver_wh_endpoint_id": {
+        "type": "string",
+        "defaultValue": "00000000-0000-0000-0000-000000000000"
+      },
+      "silver_sqlconnectionstring": {
+        "type": "string",
+        "defaultValue": "sample-sql-endpoint.datawarehouse.fabric.microsoft.com"
+      }
+    }
+  }
+}

@@ -1,0 +1,55 @@
+flowchart LR
+    %% Central operational telemetry flow
+
+    subgraph Producers["Telemetry producers"]
+        Prov["Provisioning pipeline"]
+        Ingest["Ingestion pipeline"]
+        Transform["Transformation notebooks"]
+        GoldLoad["Silver-to-gold pipeline"]
+        Warehouse["Warehouse procedures"]
+    end
+
+    Event["Structured event payload<br/>run_id, tenant_id, event_type,<br/>component, status, details, duration"]
+
+    subgraph Service["Logging service"]
+        Http["HTTP endpoint<br/>/api/log"]
+        Enrich["Add event_id and event_time"]
+        Partition["Write partitioned JSON<br/>yyyy/mm/dd/event_id.json"]
+    end
+
+    subgraph Store["Central log storage"]
+        Blob["Blob container: logs"]
+    end
+
+    subgraph Consumption["Operational consumption"]
+        IngestLogs["Log ingestion notebook or pipeline"]
+        ControlLogs["Control-plane operational log table"]
+        Dashboards["Monitoring dashboards<br/>SLA, failures, tenant operations"]
+        Alerts["Alerting and incident review"]
+    end
+
+    Prov --> Event
+    Ingest --> Event
+    Transform --> Event
+    GoldLoad --> Event
+    Warehouse --> Event
+
+    Event --> Http
+    Http --> Enrich
+    Enrich --> Partition
+    Partition --> Blob
+
+    Blob --> IngestLogs
+    IngestLogs --> ControlLogs
+    ControlLogs --> Dashboards
+    ControlLogs --> Alerts
+
+    classDef producers fill:#eaf7ef,stroke:#2f855a,color:#102a43
+    classDef service fill:#f7eefc,stroke:#805ad5,color:#102a43
+    classDef store fill:#e8f3ff,stroke:#2f70b7,color:#102a43
+    classDef consume fill:#fff4e6,stroke:#b7791f,color:#102a43
+
+    class Prov,Ingest,Transform,GoldLoad,Warehouse,Event producers
+    class Http,Enrich,Partition service
+    class Blob store
+    class IngestLogs,ControlLogs,Dashboards,Alerts consume

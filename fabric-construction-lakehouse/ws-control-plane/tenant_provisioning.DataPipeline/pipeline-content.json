@@ -1,0 +1,1088 @@
+﻿{
+  "properties": {
+    "activities": [
+      {
+        "type": "Script",
+        "typeProperties": {
+          "scripts": [
+            {
+              "text": {
+                "value": "IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = N'reporting')\nBEGIN\n    EXEC(N'CREATE SCHEMA reporting');\nEND",
+                "type": "Expression"
+              },
+              "type": "NonQuery"
+            }
+          ],
+          "scriptBlockExecutionTimeout": "02:00:00"
+        },
+        "connectionSettings": {
+          "name": "00000000_0000_0000_0000_000000000000",
+          "properties": {
+            "type": "DataWarehouse",
+            "typeProperties": {
+              "artifactId": "@variables('warehouseId')",
+              "endpoint": "@activity('Get ConnectionString').output.connectionString",
+              "workspaceId": "@variables('workspaceId')"
+            },
+            "externalReferences": {
+              "connection": "@pipeline().parameters.connectionid"
+            },
+            "annotations": []
+          }
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Create Schema",
+        "dependsOn": [
+          {
+            "activity": "Get ConnectionString",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "WebActivity",
+        "typeProperties": {
+          "method": "GET",
+          "relativeUrl": {
+            "value": "@concat(\n'workspaces/',\nvariables('workspaceId'),\n'/warehouses/',\nvariables('warehouseId'),\n'/connectionString'\n)",
+            "type": "Expression"
+          },
+          "headers": {}
+        },
+        "externalReferences": {
+          "connection": "00000000-0000-0000-0000-000000000000"
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Get ConnectionString",
+        "dependsOn": [
+          {
+            "activity": "Does DW Exist",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "WebActivity",
+        "typeProperties": {
+          "method": "GET",
+          "relativeUrl": "workspaces",
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body": {
+            "value": "@concat(\n'{',\n'\"displayName\":\"ws_', pipeline().parameters.tenantid, '\",',\n'\"capacityId\":\"', pipeline().parameters.capacityId, '\"',\n'}'\n)",
+            "type": "Expression"
+          }
+        },
+        "externalReferences": {
+          "connection": "00000000-0000-0000-0000-000000000000"
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Get Workspaces",
+        "dependsOn": []
+      },
+      {
+        "type": "Filter",
+        "typeProperties": {
+          "items": {
+            "value": "@activity('Get Workspaces').output.value",
+            "type": "Expression"
+          },
+          "condition": {
+            "value": "@equals(toLower(item().displayName), concat('ws_', toLower(pipeline().parameters.tenantid)))",
+            "type": "Expression"
+          }
+        },
+        "name": "Check Workspace Existence",
+        "dependsOn": [
+          {
+            "activity": "Get Workspaces",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "IfCondition",
+        "typeProperties": {
+          "expression": {
+            "value": "@greater(activity('Check Workspace Existence').output.FilteredItemsCount, 0)",
+            "type": "Expression"
+          },
+          "ifTrueActivities": [
+            {
+              "type": "SetVariable",
+              "typeProperties": {
+                "variableName": "workspaceId",
+                "value": {
+                  "value": "@activity('Check Workspace Existence').output.Value[0].id",
+                  "type": "Expression"
+                }
+              },
+              "policy": {
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Set ws-id",
+              "dependsOn": []
+            },
+            {
+              "type": "SetVariable",
+              "typeProperties": {
+                "variableName": "wsdisplayName",
+                "value": {
+                  "value": "@activity('Check Workspace Existence').output.Value[0].displayName",
+                  "type": "Expression"
+                }
+              },
+              "policy": {
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Set ws displayname",
+              "dependsOn": [
+                {
+                  "activity": "Set ws-id",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            }
+          ],
+          "ifFalseActivities": [
+            {
+              "type": "WebActivity",
+              "typeProperties": {
+                "method": "POST",
+                "relativeUrl": {
+                  "value": "workspaces",
+                  "type": "Expression"
+                },
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "body": {
+                  "value": "@concat(\n'{',\n'\"displayName\":\"ws_', pipeline().parameters.tenantid, '\",',\n'\"capacityId\":\"', pipeline().parameters.capacityId, '\"',\n'}'\n)",
+                  "type": "Expression"
+                }
+              },
+              "externalReferences": {
+                "connection": "00000000-0000-0000-0000-000000000000"
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Create Workspace",
+              "dependsOn": []
+            },
+            {
+              "type": "Wait",
+              "typeProperties": {
+                "waitTimeInSeconds": 10
+              },
+              "name": "Wait-ws",
+              "dependsOn": [
+                {
+                  "activity": "Create Workspace",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "SetVariable",
+              "typeProperties": {
+                "variableName": "workspaceId",
+                "value": {
+                  "value": "@activity('Create Workspace').output.id",
+                  "type": "Expression"
+                }
+              },
+              "policy": {
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Set ws-id from Create",
+              "dependsOn": [
+                {
+                  "activity": "Wait-ws",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "SetVariable",
+              "typeProperties": {
+                "variableName": "wsdisplayName",
+                "value": {
+                  "value": "@concat('ws_', pipeline().parameters.tenantid)",
+                  "type": "Expression"
+                }
+              },
+              "policy": {
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Set ws displayName2",
+              "dependsOn": [
+                {
+                  "activity": "Set ws-id from Create",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "WebActivity",
+              "typeProperties": {
+                "method": "POST",
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "body": {
+                  "value": "{\n    \"run_id\": \"@{pipeline().RunId}\",\n    \"tenant_id\": \"@{pipeline().parameters.tenantid}\",\n    \"event_type\": \"WORKSPACE_CREATED\",\n    \"component\": \"provisioning\",\n    \"details\": \"Workspace_id: @{variables('workspaceId')}, WorkspaceName: @{variables('wsdisplayName')}\",\n    \"status\": \"SUCCESS\",\n    \"message\": \"Workspace created successfully\",\n    \"duration_seconds\": 0\n}",
+                  "type": "Expression"
+                }
+              },
+              "externalReferences": {
+                "connection": "00000000-0000-0000-0000-000000000000"
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "log workspace creation",
+              "dependsOn": [
+                {
+                  "activity": "Set ws displayName2",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "name": "If Condition1",
+        "dependsOn": [
+          {
+            "activity": "Check Workspace Existence",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "WebActivity",
+        "typeProperties": {
+          "method": "GET",
+          "relativeUrl": {
+            "value": "@concat(\n  'workspaces/',\nvariables('workspaceId'),\n  '/warehouses'\n)",
+            "type": "Expression"
+          },
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body": {
+            "value": "@concat(\n'{',\n'\"displayName\":\"dw_', pipeline().parameters.tenantid, '\"',\n'}'\n)",
+            "type": "Expression"
+          }
+        },
+        "externalReferences": {
+          "connection": "00000000-0000-0000-0000-000000000000"
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Get Warehouses",
+        "dependsOn": [
+          {
+            "activity": "If Condition1",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Filter",
+        "typeProperties": {
+          "items": {
+            "value": "@activity('Get Warehouses').output.value",
+            "type": "Expression"
+          },
+          "condition": {
+            "value": "@equals(item().displayName, concat('dw_', pipeline().parameters.tenantid))",
+            "type": "Expression"
+          }
+        },
+        "name": "Check Warehouse Existence",
+        "dependsOn": [
+          {
+            "activity": "Get Warehouses",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "IfCondition",
+        "typeProperties": {
+          "expression": {
+            "value": "@greater(activity('Check Warehouse Existence').output.FilteredItemsCount, 0)",
+            "type": "Expression"
+          },
+          "ifTrueActivities": [
+            {
+              "type": "SetVariable",
+              "typeProperties": {
+                "variableName": "warehouseId",
+                "value": {
+                  "value": "@activity('Check Warehouse Existence').output.Value[0].id",
+                  "type": "Expression"
+                }
+              },
+              "policy": {
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Set wh-id",
+              "dependsOn": []
+            }
+          ],
+          "ifFalseActivities": [
+            {
+              "type": "WebActivity",
+              "typeProperties": {
+                "method": "POST",
+                "relativeUrl": {
+                  "value": "@concat(\n  'workspaces/',\n variables('workspaceId'),\n  '/warehouses'\n)",
+                  "type": "Expression"
+                },
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "body": {
+                  "value": "@concat(\n'{',\n'\"displayName\":\"dw_', pipeline().parameters.tenantid, '\"',\n'}'\n)",
+                  "type": "Expression"
+                }
+              },
+              "externalReferences": {
+                "connection": "00000000-0000-0000-0000-000000000000"
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Create Warehouse",
+              "dependsOn": []
+            },
+            {
+              "type": "Wait",
+              "typeProperties": {
+                "waitTimeInSeconds": 10
+              },
+              "name": "Wait Create WH",
+              "dependsOn": [
+                {
+                  "activity": "Create Warehouse",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "SetVariable",
+              "typeProperties": {
+                "variableName": "warehouseId",
+                "value": {
+                  "value": "@activity('Create Warehouse').output.id",
+                  "type": "Expression"
+                }
+              },
+              "policy": {
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Set wh-id from Create",
+              "dependsOn": [
+                {
+                  "activity": "Wait Create WH",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "WebActivity",
+              "typeProperties": {
+                "method": "POST",
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "body": {
+                  "value": "{\n    \"run_id\": \"@{pipeline().RunId}\",\n    \"tenant_id\": \"@{pipeline().parameters.tenantid}\",\n    \"event_type\": \"WAREHOUSE_CREATED\",\n    \"component\": \"provisioning\",\n    \"details\": \"Warehouse_id: @{variables('warehouseId')}, WarehouseName: dw_@{pipeline().parameters.tenantid}\",\n    \"status\": \"SUCCESS\",\n    \"message\": \"Workspace created successfully\",\n    \"duration_seconds\": 0\n}",
+                  "type": "Expression"
+                }
+              },
+              "externalReferences": {
+                "connection": "00000000-0000-0000-0000-000000000000"
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "log warehouse creation",
+              "dependsOn": [
+                {
+                  "activity": "Set wh-id from Create",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "name": "Does DW Exist",
+        "dependsOn": [
+          {
+            "activity": "Check Warehouse Existence",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Copy",
+        "typeProperties": {
+          "source": {
+            "type": "LakehouseTableSource",
+            "datasetSettings": {
+              "type": "LakehouseTable",
+              "typeProperties": {
+                "schema": "metadata",
+                "table": "column_mapping"
+              },
+              "schema": [],
+              "linkedService": {
+                "name": "core",
+                "properties": {
+                  "type": "Lakehouse",
+                  "typeProperties": {
+                    "artifactId": "00000000-0000-0000-0000-000000000000",
+                    "workspaceId": "00000000-0000-0000-0000-000000000000",
+                    "rootFolder": "Tables"
+                  },
+                  "annotations": []
+                }
+              },
+              "annotations": []
+            }
+          },
+          "sink": {
+            "type": "DataWarehouseSink",
+            "tableOption": "autoCreate",
+            "allowCopyCommand": true,
+            "copyCommandSettings": {},
+            "writeBehavior": "Insert",
+            "datasetSettings": {
+              "type": "DataWarehouseTable",
+              "typeProperties": {
+                "schema": "reporting",
+                "table": "column_mapping"
+              },
+              "schema": [],
+              "connectionSettings": {
+                "name": "00000000_0000_0000_0000_000000000000",
+                "properties": {
+                  "type": "DataWarehouse",
+                  "typeProperties": {
+                    "artifactId": "@variables('warehouseId')",
+                    "endpoint": "@variables('connectionString')",
+                    "workspaceId": "@variables('workspaceId')"
+                  },
+                  "externalReferences": {
+                    "connection": "@pipeline().parameters.connectionid"
+                  },
+                  "annotations": []
+                }
+              },
+              "annotations": []
+            }
+          },
+          "translator": {
+            "type": "TabularTranslator",
+            "typeConversion": true,
+            "typeConversionSettings": {
+              "allowDataTruncation": true,
+              "treatBooleanAsNumber": false
+            }
+          },
+          "enableStaging": true
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Copy Mapping Data - columns",
+        "dependsOn": [
+          {
+            "activity": "log create SPs",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Script",
+        "typeProperties": {
+          "scripts": [
+            {
+              "text": {
+                "value": "IF EXISTS (\n    SELECT 1\n    FROM INFORMATION_SCHEMA.TABLES\n    WHERE TABLE_SCHEMA = 'reporting'\n      AND TABLE_NAME = 'column_mapping'\n)\nBEGIN\n    TRUNCATE TABLE reporting.column_mapping;\nEND;\nIF EXISTS (\n    SELECT 1\n    FROM INFORMATION_SCHEMA.TABLES\n    WHERE TABLE_SCHEMA = 'reporting'\n      AND TABLE_NAME = 'table_mapping'\n)\nBEGIN\n    TRUNCATE TABLE reporting.table_mapping;\nEND",
+                "type": "Expression"
+              },
+              "type": "NonQuery"
+            }
+          ],
+          "scriptBlockExecutionTimeout": "02:00:00"
+        },
+        "connectionSettings": {
+          "name": "00000000_0000_0000_0000_000000000000",
+          "properties": {
+            "type": "DataWarehouse",
+            "typeProperties": {
+              "artifactId": "@variables('warehouseId')",
+              "endpoint": "@activity('Get ConnectionString').output.connectionString",
+              "workspaceId": "@variables('workspaceId')"
+            },
+            "externalReferences": {
+              "connection": "@pipeline().parameters.connectionid"
+            },
+            "annotations": []
+          }
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Post Provisioning Items",
+        "dependsOn": [
+          {
+            "activity": "log schema creation",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "TridentNotebook",
+        "typeProperties": {
+          "notebookId": "00000000-0000-0000-0000-000000000000",
+          "workspaceId": "00000000-0000-0000-0000-000000000000",
+          "parameters": {
+            "TenantId": {
+              "value": {
+                "value": "@pipeline().parameters.tenantid",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "TenantName": {
+              "value": {
+                "value": "@pipeline().parameters.tenantName",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "CapacityId": {
+              "value": {
+                "value": "@pipeline().parameters.capacityId",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "ConnectionId": {
+              "value": {
+                "value": "@pipeline().parameters.connectionid",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "WorkspaceId": {
+              "value": {
+                "value": "@variables('workspaceId')",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "WarehouseId": {
+              "value": {
+                "value": "@variables('warehouseId')",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "ConnectionString": {
+              "value": {
+                "value": "@activity('Get ConnectionString').output.connectionString",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Log Tenant Metadata",
+        "dependsOn": [
+          {
+            "activity": "log copy mapping tables",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Copy",
+        "typeProperties": {
+          "source": {
+            "type": "LakehouseTableSource",
+            "datasetSettings": {
+              "type": "LakehouseTable",
+              "typeProperties": {
+                "schema": "metadata",
+                "table": "table_mapping"
+              },
+              "schema": [],
+              "linkedService": {
+                "name": "core",
+                "properties": {
+                  "type": "Lakehouse",
+                  "typeProperties": {
+                    "artifactId": "00000000-0000-0000-0000-000000000000",
+                    "workspaceId": "00000000-0000-0000-0000-000000000000",
+                    "rootFolder": "Tables"
+                  },
+                  "annotations": []
+                }
+              },
+              "annotations": []
+            }
+          },
+          "sink": {
+            "type": "DataWarehouseSink",
+            "tableOption": "autoCreate",
+            "allowCopyCommand": true,
+            "copyCommandSettings": {},
+            "writeBehavior": "Insert",
+            "datasetSettings": {
+              "type": "DataWarehouseTable",
+              "typeProperties": {
+                "schema": "reporting",
+                "table": "table_mapping"
+              },
+              "schema": [],
+              "connectionSettings": {
+                "name": "00000000_0000_0000_0000_000000000000",
+                "properties": {
+                  "type": "DataWarehouse",
+                  "typeProperties": {
+                    "artifactId": "@variables('warehouseId')",
+                    "endpoint": "@variables('connectionString')",
+                    "workspaceId": "@variables('workspaceId')"
+                  },
+                  "externalReferences": {
+                    "connection": "@pipeline().parameters.connectionid"
+                  },
+                  "annotations": []
+                }
+              },
+              "annotations": []
+            }
+          },
+          "translator": {
+            "type": "TabularTranslator",
+            "typeConversion": true,
+            "typeConversionSettings": {
+              "allowDataTruncation": true,
+              "treatBooleanAsNumber": false
+            }
+          },
+          "enableStaging": true
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Copy Mapping Data - tables",
+        "dependsOn": [
+          {
+            "activity": "Copy Mapping Data - columns",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Script",
+        "typeProperties": {
+          "scripts": [
+            {
+              "text": {
+                "value": "CREATE OR ALTER     PROCEDURE [reporting].[usp_apply_scd_from_mapping]\n    @SourceSchema sysname = 'reporting',\n    @SourceTable  sysname = 'staging_gold_products',\n    @TargetSchema sysname = 'reporting',\n    @TargetTable  sysname = 'gold_dim_products',\n    @MappingSchema sysname = N'reporting',\n    @MappingTable  sysname = N'column_mapping',\n    @Debug bit = 0\nAS\nBEGIN\n    SET NOCOUNT ON;\n    DECLARE @AsOfDate datetime2(3) = GETUTCDATE();\n    DECLARE @SourceFull nvarchar(400);\n    DECLARE @TargetFull nvarchar(400);\n    DECLARE @JoinPred   nvarchar(max);\n    DECLARE @PKJoin   nvarchar(max);\n    DECLARE @Type1Set   nvarchar(max);\n    DECLARE @Type1Diff  nvarchar(max);\n    DECLARE @Type2Diff  nvarchar(max);\n    DECLARE @InsertCols nvarchar(max);\n    DECLARE @InsertVals nvarchar(max);\n    DECLARE @PKCol      sysname;\n    DECLARE @sql        nvarchar(max);\n    SET @SourceFull = QUOTENAME(@SourceSchema) + N'.' + QUOTENAME(@SourceTable);\n    SET @TargetFull = QUOTENAME(@TargetSchema) + N'.' + QUOTENAME(@TargetTable);\n    SELECT TOP (1)\n        @PKCol = QUOTENAME(target_column)\n    FROM reporting.column_mapping\n    WHERE target_table = @TargetTable\n      AND is_primary_key = 1;\n    IF @PKCol IS NULL\n        THROW 50001, 'No primary key mapping found.', 1;\n\t\n    SELECT\n    @PKJoin =\n        STRING_AGG(\n            CASE\n                WHEN is_primary_key = 1 THEN\n                    N's.' + QUOTENAME(source_column) +\n                    N' = t.' + QUOTENAME(target_column)\n            END,\n            N' AND '\n        ),\n    @Type1Set =\n        STRING_AGG(\n            CASE\n                WHEN is_scd_type1 = 1 THEN\n                    N't.' + QUOTENAME(target_column) +\n                    N' = s.' + QUOTENAME(source_column)\n            END,\n            N', '\n        ),\n    @Type1Diff =\n        STRING_AGG(\n            CASE\n                WHEN is_scd_type1 = 1\n                 AND track_changes = 1 THEN\n                    N'ISNULL(CONVERT(nvarchar(max),s.' +\n                    QUOTENAME(source_column) +\n                    N'),''<NULL>'') <> ' +\n                    N'ISNULL(CONVERT(nvarchar(max),t.' +\n                    QUOTENAME(target_column) +\n                    N'),''<NULL>'')'\n            END,\n            N' OR '\n        ),\n    @Type2Diff =\n        STRING_AGG(\n            CASE\n                WHEN is_scd_type2 = 1\n                 AND track_changes = 1 THEN\n                    N'ISNULL(CONVERT(nvarchar(max),s.' +\n                    QUOTENAME(source_column) +\n                    N'),''<NULL>'') <> ' +\n                    N'ISNULL(CONVERT(nvarchar(max),t.' +\n                    QUOTENAME(target_column) +\n                    N'),''<NULL>'')'\n            END,\n            N' OR '\n        ),\n    @InsertCols =\n        STRING_AGG(QUOTENAME(target_column), N', '),\n    @InsertVals =\n        STRING_AGG(\n            N's.' + QUOTENAME(source_column),\n            N', '\n        )\n    FROM reporting.column_mapping\n    WHERE target_table = @TargetTable;\n\tSET @InsertCols = @InsertCols + N',[tenant_id],[ingestion_date],[valid_from],[valid_to],[is_active]'\n\tSET @InsertVals = @InsertVals + N',s.[tenant_id],s.[ingestion_date]'\n    SET @sql = N'\nBEGIN TRY\n    BEGIN TRAN;\n    IF OBJECT_ID(''tempdb..#chg'') IS NOT NULL\n        DROP TABLE #chg;\n\t-- Type 2 SCD\n\tWITH dim AS \n\t(\n\t\tSELECT * FROM ' + @TargetFull + N' WHERE is_active = 1\n\t)\n    SELECT s.*, IIF(t.' + @PKCol + N' IS NULL,''New'',''Changed'') AS Change_Type\n    INTO #chg\n    FROM ' + @SourceFull + N' s\n    LEFT JOIN dim t\n        ON ' + @PKJoin + N'\n    WHERE t.' + @PKCol + N' IS NULL\n       OR (' + ISNULL(@Type2Diff, N'1=0') + N');\n\t-- Expire old rows\n\tUPDATE t\n       SET t.is_active = 0,\n           t.valid_to = GETUTCDATE()\n    FROM ' + @TargetFull + N' t\n    JOIN #chg c\n      ON ' + REPLACE(@PKJoin, N's.', N'c.') + N'\n    WHERE t.is_active = 1;\n\t-- New Rows for SCD2\n\tINSERT INTO ' + @TargetFull + N'\n    (\n        ' + @InsertCols + N'\n    )\n    SELECT\n        ' + @InsertVals + N',\n        CAST(GETUTCDATE() AS DATE),\n        CONVERT(date, ''9999-12-31''),\n        1\n    FROM #chg s\n    WHERE s.Change_Type = ''Changed''\n\t-- New\n\tINSERT INTO ' + @TargetFull + N'\n    (\n        ' + @InsertCols + N'\n    )\n    SELECT\n        ' + @InsertVals + N',\n        CAST(GETUTCDATE() AS DATE),\n        CONVERT(date, ''9999-12-31''),\n        1\n    FROM #chg s\n    WHERE s.Change_Type = ''New''\n\t\n\t-- Type 1\n\t' + CASE\n            WHEN NULLIF(@Type1Set, N'') IS NOT NULL THEN\nN'\n    UPDATE t\n       SET ' + @Type1Set + N'\n    FROM ' + @TargetFull + N' t\n    JOIN ' + @SourceFull + N' s\n      ON ' + @PKJoin + N'\n    WHERE t.is_active = 1\n      AND (' + ISNULL(@Type1Diff, N'1=0') + N');\n'\n            ELSE N''\n        END + N'\n    COMMIT TRAN;\nEND TRY\nBEGIN CATCH\n    IF @@TRANCOUNT > 0\n        ROLLBACK TRAN;\n    THROW;\nEND CATCH;\n';\n    IF @Debug = 1\n    BEGIN\n        SELECT @sql AS generated_sql;\n        RETURN;\n    END;\n    BEGIN TRY\n\t\tPRINT @sql\n        EXEC sp_executesql\n            @sql\n    END TRY\n    BEGIN CATCH\n        IF @@TRANCOUNT > 0\n            ROLLBACK TRAN;\n        THROW;\n    END CATCH\nEND;",
+                "type": "Expression"
+              },
+              "type": "NonQuery"
+            }
+          ],
+          "scriptBlockExecutionTimeout": "02:00:00"
+        },
+        "connectionSettings": {
+          "name": "00000000_0000_0000_0000_000000000000",
+          "properties": {
+            "type": "DataWarehouse",
+            "typeProperties": {
+              "artifactId": "@variables('warehouseId')",
+              "endpoint": "@activity('Get ConnectionString').output.connectionString",
+              "workspaceId": "@variables('workspaceId')"
+            },
+            "externalReferences": {
+              "connection": "@pipeline().parameters.connectionid"
+            },
+            "annotations": []
+          }
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Create Stored Procedures",
+        "dependsOn": [
+          {
+            "activity": "log create tables",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Script",
+        "typeProperties": {
+          "scripts": [
+            {
+              "text": {
+                "value": "IF NOT EXISTS (\n    SELECT 1\n    FROM INFORMATION_SCHEMA.TABLES\n    WHERE TABLE_SCHEMA = 'reporting'\n      AND TABLE_NAME = 'gold_dim_products'\n)\nBEGIN\n    CREATE TABLE [reporting].[gold_dim_products](\n        [product_id] [int] NOT NULL,\n        [category_id] [int] NOT NULL,\n        [cost_price] [float] NOT NULL,\n        [list_price] [float] NOT NULL,\n        [product_name] [varchar](100) NOT NULL,\n        [brand] [varchar](100) NOT NULL,\n        [tenant_id] [varchar](50) NOT NULL,\n        [ingestion_date] [date] NULL,\n        [valid_from] [date] NULL,\n        [valid_to] [date] NULL,\n        [is_active] [bit] NULL\n    );\nEND;\nIF EXISTS (\n    SELECT 1\n    FROM INFORMATION_SCHEMA.TABLES\n    WHERE TABLE_SCHEMA = 'reporting'\n      AND TABLE_NAME = 'table_mapping'\n)\nBEGIN\n    TRUNCATE TABLE reporting.table_mapping;\nEND",
+                "type": "Expression"
+              },
+              "type": "NonQuery"
+            }
+          ],
+          "scriptBlockExecutionTimeout": "02:00:00"
+        },
+        "connectionSettings": {
+          "name": "00000000_0000_0000_0000_000000000000",
+          "properties": {
+            "type": "DataWarehouse",
+            "typeProperties": {
+              "artifactId": "@variables('warehouseId')",
+              "endpoint": "@activity('Get ConnectionString').output.connectionString",
+              "workspaceId": "@variables('workspaceId')"
+            },
+            "externalReferences": {
+              "connection": "@pipeline().parameters.connectionid"
+            },
+            "annotations": []
+          }
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Create Tables",
+        "dependsOn": [
+          {
+            "activity": "log other items",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "WebActivity",
+        "typeProperties": {
+          "method": "POST",
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body": {
+            "value": "{\n    \"run_id\": \"@{pipeline().RunId}\",\n    \"tenant_id\": \"@{pipeline().parameters.tenantid}\",\n    \"event_type\": \"WAREHOUSE_CREATED\",\n    \"component\": \"provisioning\",\n    \"details\": \"Warehouse_id: @{variables('warehouseId')}, WarehouseName: dw_@{pipeline().parameters.tenantid}\",\n    \"status\": \"SUCCESS\",\n    \"message\": \"Workspace created successfully\",\n    \"duration_seconds\": 0\n}",
+            "type": "Expression"
+          }
+        },
+        "externalReferences": {
+          "connection": "00000000-0000-0000-0000-000000000000"
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "log schema creation",
+        "dependsOn": [
+          {
+            "activity": "Create Schema",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "WebActivity",
+        "typeProperties": {
+          "method": "POST",
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body": {
+            "value": "{\n    \"run_id\": \"@{pipeline().RunId}\",\n    \"tenant_id\": \"@{pipeline().parameters.tenantid}\",\n    \"event_type\": \"POST_PROVISIONING\",\n    \"component\": \"provisioning\",\n    \"details\": \"Warehouse_id: @{variables('warehouseId')}, WarehouseName: dw_@{pipeline().parameters.tenantid}\",\n    \"status\": \"SUCCESS\",\n    \"message\": \"Workspace created successfully\",\n    \"duration_seconds\": 0\n}",
+            "type": "Expression"
+          }
+        },
+        "externalReferences": {
+          "connection": "00000000-0000-0000-0000-000000000000"
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "log other items",
+        "dependsOn": [
+          {
+            "activity": "Post Provisioning Items",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "WebActivity",
+        "typeProperties": {
+          "method": "POST",
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body": {
+            "value": "{\n    \"run_id\": \"@{pipeline().RunId}\",\n    \"tenant_id\": \"@{pipeline().parameters.tenantid}\",\n    \"event_type\": \"WAREHOUSE_TABLES_CREATED\",\n    \"component\": \"provisioning\",\n    \"details\": \"Warehouse_id: @{variables('warehouseId')}, WarehouseName: dw_@{pipeline().parameters.tenantid}\",\n    \"status\": \"SUCCESS\",\n    \"message\": \"Workspace created successfully\",\n    \"duration_seconds\": 0\n}",
+            "type": "Expression"
+          }
+        },
+        "externalReferences": {
+          "connection": "00000000-0000-0000-0000-000000000000"
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "log create tables",
+        "dependsOn": [
+          {
+            "activity": "Create Tables",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "WebActivity",
+        "typeProperties": {
+          "method": "POST",
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body": {
+            "value": "{\n    \"run_id\": \"@{pipeline().RunId}\",\n    \"tenant_id\": \"@{pipeline().parameters.tenantid}\",\n    \"event_type\": \"WAREHOUSE_SPs_CREATED\",\n    \"component\": \"provisioning\",\n    \"details\": \"Warehouse_id: @{variables('warehouseId')}, WarehouseName: dw_@{pipeline().parameters.tenantid}\",\n    \"status\": \"SUCCESS\",\n    \"message\": \"Workspace created successfully\",\n    \"duration_seconds\": 0\n}",
+            "type": "Expression"
+          }
+        },
+        "externalReferences": {
+          "connection": "00000000-0000-0000-0000-000000000000"
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "log create SPs",
+        "dependsOn": [
+          {
+            "activity": "Create Stored Procedures",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "WebActivity",
+        "typeProperties": {
+          "method": "POST",
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body": {
+            "value": "{\n    \"run_id\": \"@{pipeline().RunId}\",\n    \"tenant_id\": \"@{pipeline().parameters.tenantid}\",\n    \"event_type\": \"MAPPING_TABLES\",\n    \"component\": \"provisioning\",\n    \"details\": \"Warehouse_id: @{variables('warehouseId')}, WarehouseName: dw_@{pipeline().parameters.tenantid}\",\n    \"status\": \"SUCCESS\",\n    \"message\": \"Workspace created successfully\",\n    \"duration_seconds\": 0\n}",
+            "type": "Expression"
+          }
+        },
+        "externalReferences": {
+          "connection": "00000000-0000-0000-0000-000000000000"
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "log copy mapping tables",
+        "dependsOn": [
+          {
+            "activity": "Copy Mapping Data - tables",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      }
+    ],
+    "parameters": {
+      "tenantid": {
+        "type": "string",
+        "defaultValue": "tenant8"
+      },
+      "capacityId": {
+        "type": "string",
+        "defaultValue": "00000000-0000-0000-0000-000000000000"
+      },
+      "connectionid": {
+        "type": "string",
+        "defaultValue": "00000000-0000-0000-0000-000000000000"
+      },
+      "tenantName": {
+        "type": "string",
+        "defaultValue": "Tenant 8"
+      }
+    },
+    "variables": {
+      "workspaceId": {
+        "type": "String"
+      },
+      "warehouseId": {
+        "type": "String"
+      },
+      "connectionString": {
+        "type": "String"
+      },
+      "workspaceExists": {
+        "type": "Boolean"
+      },
+      "warehouseExists": {
+        "type": "Boolean"
+      },
+      "wsdisplayName": {
+        "type": "String"
+      }
+    }
+  }
+}

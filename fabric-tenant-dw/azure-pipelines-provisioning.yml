@@ -1,0 +1,176 @@
+﻿trigger: none
+
+parameters:
+- name: tenantId
+  type: string
+
+- name: sqlServer
+  type: string
+
+variables:
+- group: fabric-cicd-vars
+
+pool:
+  vmImage: 'windows-latest'
+
+stages:
+
+# =========================
+# STAGE 1 - BUILD DACPAC
+# =========================
+- stage: Build_DACPAC
+  displayName: "Build DACPAC"
+
+  jobs:
+  - job: Build
+    displayName: "Build SQL Project"
+
+    steps:
+
+    # Install NuGet
+    - task: NuGetToolInstaller@1
+
+    # Restore dependencies
+    - task: NuGetCommand@2
+      displayName: "Restore SQL Project"
+      inputs:
+        command: 'restore'
+        restoreSolution: 'fabric-tenant-dw.sqlproj'
+
+    # Build SQL Project
+    - task: VSBuild@1
+      displayName: "Build DACPAC"
+      inputs:
+        solution: 'fabric-tenant-dw.sqlproj'
+        configuration: 'Release'
+
+    # Locate and stage DACPAC
+    - task: PowerShell@2
+      displayName: "Stage DACPAC"
+      inputs:
+        targetType: inline
+        script: |
+
+          Write-Host "Searching for DACPAC..."
+
+          $dacpac = Get-ChildItem `
+            -Path "$(Build.SourcesDirectory)" `
+            -Recurse `
+            -Filter "*.dacpac" |
+            Select-Object -First 1
+
+          if (-not $dacpac) {
+              throw "DACPAC not found after build"
+          }
+
+          Write-Host "DACPAC found:"
+          Write-Host $dacpac.FullName
+
+          Copy-Item `
+            $dacpac.FullName `
+            "$(Build.ArtifactStagingDirectory)/fabric-tenant-dw.dacpac"
+
+    # Publish pipeline artifact
+    - task: PublishPipelineArtifact@1
+      displayName: "Publish DACPAC Artifact"
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)'
+        artifact: 'dacpac'
+
+
+# =========================
+# STAGE 2 - DEPLOY TENANT
+# =========================
+- stage: Provision_Tenant
+  displayName: "Provision Fabric Tenant"
+  dependsOn: Build_DACPAC
+  condition: succeeded()
+
+  jobs:
+  - job: Deploy
+    displayName: "Deploy to Fabric Warehouse"
+
+    steps:
+
+    # Download artifact from previous stage
+    - download: current
+      artifact: dacpac
+
+    # Install SqlPackage
+    - task: PowerShell@2
+      displayName: "Install SqlPackage"
+      inputs:
+        targetType: inline
+        script: |
+
+          Write-Host "Installing SqlPackage..."
+
+          Invoke-WebRequest `
+            -Uri "https://aka.ms/sqlpackage-windows" `
+            -OutFile "sqlpackage.zip"
+
+          Expand-Archive `
+            sqlpackage.zip `
+            -DestinationPath "$env:AGENT_TEMPDIRECTORY\sqlpackage"
+
+          Write-Host "##vso[task.prependpath]$env:AGENT_TEMPDIRECTORY\sqlpackage"
+
+          Write-Host "SqlPackage installed"
+
+    # Deploy DACPAC
+    - task: PowerShell@2
+      displayName: "Deploy DACPAC to Fabric Warehouse"
+      inputs:
+        targetType: inline
+        script: |
+
+          $tenantId = "${{ parameters.tenantId }}"
+          $sqlhost  = "${{ parameters.sqlServer }}"
+          $database = "dw_$tenantId"
+
+          Write-Host "===================================="
+          Write-Host "Tenant: $tenantId"
+          Write-Host "SQL Host: $sqlhost"
+          Write-Host "Database: $database"
+          Write-Host "===================================="
+
+          # DACPAC artifact path
+          $dacpacPath = "$(Pipeline.Workspace)/dacpac/fabric-tenant-dw.dacpac"
+
+          if (!(Test-Path $dacpacPath)) {
+              throw "DACPAC not found at $dacpacPath"
+          }
+
+          Write-Host "Acquiring Azure AD token..."
+
+          $body = @{
+              client_id     = "$(clientId)"
+              client_secret = "$(clientSecret)"
+              scope         = "https://database.windows.net/.default"
+              grant_type    = "client_credentials"
+          }
+
+          $tokenResponse = Invoke-RestMethod `
+              -Method Post `
+              -Uri "https://login.microsoftonline.com/$(aadTenantId)/oauth2/v2.0/token" `
+              -Body $body `
+              -ContentType "application/x-www-form-urlencoded"
+
+          $accessToken = $tokenResponse.access_token
+
+          if (-not $accessToken) {
+              throw "Failed to acquire Azure AD access token"
+          }
+
+          Write-Host "Access token acquired"
+
+          Write-Host "Starting DACPAC deployment..."
+
+          SqlPackage `
+            /Action:Publish `
+            /SourceFile:$dacpacPath `
+            /TargetServerName:$sqlhost `
+            /TargetDatabaseName:$database `
+            /AccessToken:$accessToken
+
+          Write-Host "DACPAC deployment completed"

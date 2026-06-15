@@ -1,0 +1,23 @@
+flowchart LR
+    %% Fabric deployment pipeline environment promotion
+
+    Dev["Development<br/>dev-ws-control-plane"]
+    Test["Test<br/>test-ws-control-plane"]
+    Prod["Production<br/>prod-ws-control-plane"]
+
+    DevOps["Azure DevOps<br/>environment promotion pipeline"]
+    Entra["Microsoft Entra ID<br/>service principal token"]
+    FabricAPI["Fabric REST API<br/>deploymentPipelines/{pipelineId}/deploy"]
+
+    DevOps --> Entra
+    Entra --> DevOps
+    DevOps --> FabricAPI
+    FabricAPI --> Dev
+    Dev --> Test
+    Test --> Prod
+
+    classDef env fill:#e8f3ff,stroke:#2f70b7,color:#102a43
+    classDef automation fill:#eaf7ef,stroke:#2f855a,color:#102a43
+
+    class Dev,Test,Prod env
+    class DevOps,Entra,FabricAPI automation

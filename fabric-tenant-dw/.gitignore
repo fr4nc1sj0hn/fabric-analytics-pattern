@@ -1,0 +1,12 @@
+# Build outputs
+bin/
+obj/
+*.dacpac
+
+# Visual Studio / VS Code noise
+*.sqlproj.user
+*.dbmdl
+.vscode/
+
+# Local environment
+*.log

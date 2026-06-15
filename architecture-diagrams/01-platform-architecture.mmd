@@ -1,0 +1,89 @@
+flowchart LR
+    %% Metadata-driven multi-tenant Fabric architecture
+
+    subgraph Sources["Source and Landing"]
+        SourceFiles["Source files"]
+        Blob["Azure Blob Storage<br/>raw landing"]
+    end
+
+    subgraph Ingestion["ws-ingestion-hub"]
+        Bronze["Bronze lakehouse<br/>raw tenant/date partitions"]
+        IngestPipe["Ingestion pipelines"]
+    end
+
+    subgraph Control["ws-control-plane"]
+        ControlLake["Control lakehouse"]
+        TenantMeta["Tenant metadata"]
+        MappingMeta["Mapping metadata"]
+        Provisioning["Tenant provisioning pipeline"]
+    end
+
+    subgraph Processing["ws-processing-hub"]
+        Silver["Silver lakehouse<br/>shared conformed Delta tables"]
+        TransformNbs["Generic transformation notebooks"]
+        DQ["Silver DQ checks"]
+        LoadPipe["Silver-to-gold pipeline"]
+    end
+
+    subgraph Tenant["Tenant serving workspace<br/>ws_{tenant}"]
+        Warehouse["Fabric warehouse<br/>dw_{tenant}"]
+        Stage["Reporting staging tables"]
+        Gold["Gold dimensional tables"]
+        Proc["Metadata-driven SCD procedure"]
+    end
+
+    subgraph Observability["Observability"]
+        LogSvc["HTTP logging service"]
+        LogStore["Central log storage"]
+    end
+
+    BI["Power BI and downstream consumers"]
+    DevOps["Azure DevOps<br/>database project and deployment"]
+    AllTenantDeploy["All-tenant DACPAC rollout"]
+    FabricDeploy["Fabric deployment pipeline<br/>Development -> Test -> Production"]
+
+    SourceFiles --> Blob
+    Blob --> IngestPipe
+    IngestPipe --> Bronze
+    Bronze --> TransformNbs
+    TransformNbs --> Silver
+    Silver --> DQ
+
+    ControlLake --> TenantMeta
+    ControlLake --> MappingMeta
+    TenantMeta --> Provisioning
+    Provisioning --> Warehouse
+    Provisioning --> TenantMeta
+    MappingMeta --> LoadPipe
+    TenantMeta --> LoadPipe
+
+    DQ --> LoadPipe
+    LoadPipe --> Stage
+    Stage --> Proc
+    Proc --> Gold
+    Gold --> BI
+
+    DevOps --> Warehouse
+    DevOps --> AllTenantDeploy
+    AllTenantDeploy --> Warehouse
+    DevOps --> FabricDeploy
+    FabricDeploy --> Control
+    FabricDeploy --> Processing
+    FabricDeploy --> Ingestion
+    Provisioning --> LogSvc
+    DQ --> LogSvc
+    LoadPipe --> LogSvc
+    TransformNbs --> LogSvc
+    LogSvc --> LogStore
+
+    classDef control fill:#e8f3ff,stroke:#2f70b7,color:#102a43
+    classDef processing fill:#eaf7ef,stroke:#2f855a,color:#102a43
+    classDef tenant fill:#fff4e6,stroke:#b7791f,color:#102a43
+    classDef obs fill:#f7eefc,stroke:#805ad5,color:#102a43
+    classDef external fill:#f7f7f7,stroke:#666,color:#102a43
+
+    class ControlLake,TenantMeta,MappingMeta,Provisioning control
+    class Silver,TransformNbs,DQ,LoadPipe,Bronze,IngestPipe processing
+    class Warehouse,Stage,Gold,Proc tenant
+    class LogSvc,LogStore obs
+    class SourceFiles,Blob,BI,DevOps,AllTenantDeploy,FabricDeploy external

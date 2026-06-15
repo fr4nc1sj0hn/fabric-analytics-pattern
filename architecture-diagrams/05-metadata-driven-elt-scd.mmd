@@ -1,0 +1,79 @@
+flowchart TB
+    %% Metadata-driven ELT and warehouse SCD pattern
+
+    subgraph Bronze["Bronze"]
+        Raw["Raw files<br/>tenant_id / ingestion_date"]
+    end
+
+    subgraph Shortcuts["Silver lakehouse shortcuts"]
+        BronzeRawShortcut["Files/bronze_raw"]
+        ControlShortcut["Tables/control"]
+        MetadataShortcut["Tables/metadata"]
+    end
+
+    subgraph Silver["Shared silver lakehouse"]
+        GenericSilver["Generic bronze-to-silver notebook"]
+        SilverTable["Conformed Delta table<br/>partitioned by tenant_id and ingestion_date"]
+        DQCheck["Silver DQ check notebook"]
+        DQResults["control.data_quality_results"]
+    end
+
+    subgraph Metadata["Metadata contract"]
+        TenantMeta["Tenant metadata"]
+        TableMap["reporting.table_mapping"]
+        ColumnMap["reporting.column_mapping<br/>PK, Type 1, Type 2, tracking flags"]
+        DQRules["control.data_quality_rules"]
+    end
+
+    subgraph Pipeline["Silver-to-gold orchestration"]
+        TenantFilter["Tenant-filtered source query"]
+        StageLoad["Copy to warehouse staging table"]
+        ExecuteSCD["Execute SCD stored procedure"]
+    end
+
+    subgraph Warehouse["Tenant warehouse"]
+        Stage["reporting.stage_*"]
+        SCDProc["reporting.usp_apply_scd_from_mapping"]
+        Dim["reporting.gold_dim_*"]
+    end
+
+    Raw --> BronzeRawShortcut
+    TenantMeta --> ControlShortcut
+    TableMap --> MetadataShortcut
+    ColumnMap --> MetadataShortcut
+
+    BronzeRawShortcut --> GenericSilver
+    ControlShortcut --> GenericSilver
+    MetadataShortcut --> GenericSilver
+
+    GenericSilver --> SilverTable
+    SilverTable --> DQCheck
+    DQRules --> DQCheck
+    DQCheck --> DQResults
+    DQCheck --> TenantFilter
+
+    TenantMeta --> TenantFilter
+    TableMap --> StageLoad
+    ColumnMap --> SCDProc
+
+    TenantFilter --> StageLoad
+    StageLoad --> Stage
+    Stage --> ExecuteSCD
+    ExecuteSCD --> SCDProc
+    SCDProc --> Dim
+
+    SCDProc --> Expire["Expire changed active rows"]
+    SCDProc --> Insert["Insert new current versions"]
+    SCDProc --> Type1["Apply Type 1 updates"]
+
+    classDef bronze fill:#f7f7f7,stroke:#666,color:#102a43
+    classDef shortcut fill:#e8f3ff,stroke:#2f70b7,color:#102a43
+    classDef silver fill:#eaf7ef,stroke:#2f855a,color:#102a43
+    classDef metadata fill:#e8f3ff,stroke:#2f70b7,color:#102a43
+    classDef warehouse fill:#fff4e6,stroke:#b7791f,color:#102a43
+
+    class Raw bronze
+    class BronzeRawShortcut,ControlShortcut,MetadataShortcut shortcut
+    class GenericSilver,SilverTable,DQCheck,DQResults,TenantFilter,StageLoad,ExecuteSCD silver
+    class TenantMeta,TableMap,ColumnMap,DQRules metadata
+    class Stage,SCDProc,Dim,Expire,Insert,Type1 warehouse

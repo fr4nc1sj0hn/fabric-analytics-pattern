@@ -1,0 +1,29 @@
+flowchart LR
+    %% All-tenant database change rollout
+
+    DevOps["Azure DevOps<br/>azure-pipelines-all-tenants.yml"]
+    Build["Build DACPAC"]
+    Registry["Core lakehouse SQL endpoint<br/>control.tenant_info"]
+    Manifest["Tenant manifest<br/>tenants.json"]
+    Loop["For each active tenant"]
+    Deploy["SqlPackage publish<br/>/AccessToken"]
+    TenantDW["Tenant warehouses<br/>dw_{tenant}"]
+    Failures["failedTenants collection"]
+
+    DevOps --> Build
+    Build --> Registry
+    Registry --> Manifest
+    Manifest --> Loop
+    Loop --> Deploy
+    Deploy --> TenantDW
+    Deploy --> Failures
+
+    classDef cicd fill:#eaf7ef,stroke:#2f855a,color:#102a43
+    classDef registry fill:#e8f3ff,stroke:#2f70b7,color:#102a43
+    classDef tenant fill:#fff4e6,stroke:#b7791f,color:#102a43
+    classDef risk fill:#fff5f5,stroke:#c53030,color:#102a43
+
+    class DevOps,Build,Loop,Deploy cicd
+    class Registry,Manifest registry
+    class TenantDW tenant
+    class Failures risk

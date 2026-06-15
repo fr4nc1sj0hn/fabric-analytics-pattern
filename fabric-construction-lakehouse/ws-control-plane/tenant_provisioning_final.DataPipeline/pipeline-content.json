@@ -1,0 +1,1030 @@
+﻿{
+  "properties": {
+    "activities": [
+      {
+        "type": "WebActivity",
+        "typeProperties": {
+          "method": "GET",
+          "relativeUrl": "workspaces",
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body": {
+            "value": "@concat(\n'{',\n'\"displayName\":\"ws_', pipeline().parameters.tenantid, '\",',\n'\"capacityId\":\"', pipeline().parameters.capacityId, '\"',\n'}'\n)",
+            "type": "Expression"
+          }
+        },
+        "externalReferences": {
+          "connection": "00000000-0000-0000-0000-000000000000"
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Get Workspaces",
+        "dependsOn": [
+          {
+            "activity": "Set devops pipeline id",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Filter",
+        "typeProperties": {
+          "items": {
+            "value": "@activity('Get Workspaces').output.value",
+            "type": "Expression"
+          },
+          "condition": {
+            "value": "@equals(toLower(item().displayName), concat('ws_', toLower(pipeline().parameters.tenantid)))",
+            "type": "Expression"
+          }
+        },
+        "name": "Check Workspace Existence",
+        "dependsOn": [
+          {
+            "activity": "Get Workspaces",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "IfCondition",
+        "typeProperties": {
+          "expression": {
+            "value": "@greater(activity('Check Workspace Existence').output.FilteredItemsCount, 0)",
+            "type": "Expression"
+          },
+          "ifTrueActivities": [
+            {
+              "type": "SetVariable",
+              "typeProperties": {
+                "variableName": "workspaceId",
+                "value": {
+                  "value": "@activity('Check Workspace Existence').output.Value[0].id",
+                  "type": "Expression"
+                }
+              },
+              "policy": {
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Set ws-id",
+              "dependsOn": []
+            },
+            {
+              "type": "SetVariable",
+              "typeProperties": {
+                "variableName": "wsdisplayName",
+                "value": {
+                  "value": "@activity('Check Workspace Existence').output.Value[0].displayName",
+                  "type": "Expression"
+                }
+              },
+              "policy": {
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Set ws displayname",
+              "dependsOn": [
+                {
+                  "activity": "Set ws-id",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            }
+          ],
+          "ifFalseActivities": [
+            {
+              "type": "WebActivity",
+              "typeProperties": {
+                "method": "POST",
+                "relativeUrl": {
+                  "value": "workspaces",
+                  "type": "Expression"
+                },
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "body": {
+                  "value": "@concat(\n'{',\n'\"displayName\":\"ws_', pipeline().parameters.tenantid, '\",',\n'\"capacityId\":\"', pipeline().parameters.capacityId, '\"',\n'}'\n)",
+                  "type": "Expression"
+                }
+              },
+              "externalReferences": {
+                "connection": "00000000-0000-0000-0000-000000000000"
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Create Workspace",
+              "dependsOn": []
+            },
+            {
+              "type": "Wait",
+              "typeProperties": {
+                "waitTimeInSeconds": 10
+              },
+              "name": "Wait-ws",
+              "dependsOn": [
+                {
+                  "activity": "Create Workspace",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "SetVariable",
+              "typeProperties": {
+                "variableName": "workspaceId",
+                "value": {
+                  "value": "@activity('Create Workspace').output.id",
+                  "type": "Expression"
+                }
+              },
+              "policy": {
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Set ws-id from Create",
+              "dependsOn": [
+                {
+                  "activity": "Wait-ws",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "SetVariable",
+              "typeProperties": {
+                "variableName": "wsdisplayName",
+                "value": {
+                  "value": "@concat('ws_', pipeline().parameters.tenantid)",
+                  "type": "Expression"
+                }
+              },
+              "policy": {
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Set ws displayName2",
+              "dependsOn": [
+                {
+                  "activity": "Set ws-id from Create",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "WebActivity",
+              "typeProperties": {
+                "method": "POST",
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "body": {
+                  "value": "{\n    \"run_id\": \"@{pipeline().RunId}\",\n    \"tenant_id\": \"@{pipeline().parameters.tenantid}\",\n    \"event_type\": \"WORKSPACE_CREATED\",\n    \"component\": \"provisioning\",\n    \"details\": \"Workspace_id: @{variables('workspaceId')}, WorkspaceName: @{variables('wsdisplayName')}\",\n    \"status\": \"SUCCESS\",\n    \"message\": \"Workspace created successfully\",\n    \"duration_seconds\": 0\n}",
+                  "type": "Expression"
+                }
+              },
+              "externalReferences": {
+                "connection": "00000000-0000-0000-0000-000000000000"
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "log workspace creation",
+              "dependsOn": [
+                {
+                  "activity": "Add WS permission to Service Principal",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "WebActivity",
+              "typeProperties": {
+                "method": "POST",
+                "relativeUrl": {
+                  "value": "workspaces/@{variables('workspaceId')}/roleAssignments",
+                  "type": "Expression"
+                },
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "body": {
+                  "principal": {
+                    "id": "@{variables('service_principal_id')}",
+                    "type": "ServicePrincipal"
+                  },
+                  "role": "Contributor"
+                }
+              },
+              "externalReferences": {
+                "connection": "00000000-0000-0000-0000-000000000000"
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Add WS permission to Service Principal",
+              "dependsOn": [
+                {
+                  "activity": "Set ws displayName2",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "name": "If Condition1",
+        "dependsOn": [
+          {
+            "activity": "Check Workspace Existence",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "WebActivity",
+        "typeProperties": {
+          "method": "GET",
+          "relativeUrl": {
+            "value": "@concat(\n  'workspaces/',\nvariables('workspaceId'),\n  '/warehouses'\n)",
+            "type": "Expression"
+          },
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body": {
+            "value": "@concat(\n'{',\n'\"displayName\":\"dw_', pipeline().parameters.tenantid, '\"',\n'}'\n)",
+            "type": "Expression"
+          }
+        },
+        "externalReferences": {
+          "connection": "00000000-0000-0000-0000-000000000000"
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Get Warehouses",
+        "dependsOn": [
+          {
+            "activity": "If Condition1",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Filter",
+        "typeProperties": {
+          "items": {
+            "value": "@activity('Get Warehouses').output.value",
+            "type": "Expression"
+          },
+          "condition": {
+            "value": "@equals(item().displayName, concat('dw_', pipeline().parameters.tenantid))",
+            "type": "Expression"
+          }
+        },
+        "name": "Check Warehouse Existence",
+        "dependsOn": [
+          {
+            "activity": "Get Warehouses",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "IfCondition",
+        "typeProperties": {
+          "expression": {
+            "value": "@greater(activity('Check Warehouse Existence').output.FilteredItemsCount, 0)",
+            "type": "Expression"
+          },
+          "ifTrueActivities": [
+            {
+              "type": "SetVariable",
+              "typeProperties": {
+                "variableName": "warehouseId",
+                "value": {
+                  "value": "@activity('Check Warehouse Existence').output.Value[0].id",
+                  "type": "Expression"
+                }
+              },
+              "policy": {
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Set wh-id",
+              "dependsOn": []
+            }
+          ],
+          "ifFalseActivities": [
+            {
+              "type": "WebActivity",
+              "typeProperties": {
+                "method": "POST",
+                "relativeUrl": {
+                  "value": "@concat(\n  'workspaces/',\n variables('workspaceId'),\n  '/warehouses'\n)",
+                  "type": "Expression"
+                },
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "body": {
+                  "value": "@concat(\n'{',\n'\"displayName\":\"dw_', pipeline().parameters.tenantid, '\"',\n'}'\n)",
+                  "type": "Expression"
+                }
+              },
+              "externalReferences": {
+                "connection": "00000000-0000-0000-0000-000000000000"
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Create Warehouse",
+              "dependsOn": []
+            },
+            {
+              "type": "Wait",
+              "typeProperties": {
+                "waitTimeInSeconds": 10
+              },
+              "name": "Wait Create WH",
+              "dependsOn": [
+                {
+                  "activity": "Create Warehouse",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "SetVariable",
+              "typeProperties": {
+                "variableName": "warehouseId",
+                "value": {
+                  "value": "@activity('Create Warehouse').output.id",
+                  "type": "Expression"
+                }
+              },
+              "policy": {
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Set wh-id from Create",
+              "dependsOn": [
+                {
+                  "activity": "Wait Create WH",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "WebActivity",
+              "typeProperties": {
+                "method": "POST",
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "body": {
+                  "value": "{\n    \"run_id\": \"@{pipeline().RunId}\",\n    \"tenant_id\": \"@{pipeline().parameters.tenantid}\",\n    \"event_type\": \"WAREHOUSE_CREATED\",\n    \"component\": \"provisioning\",\n    \"details\": \"Warehouse_id: @{variables('warehouseId')}, WarehouseName: dw_@{pipeline().parameters.tenantid}\",\n    \"status\": \"SUCCESS\",\n    \"message\": \"Workspace created successfully\",\n    \"duration_seconds\": 0\n}",
+                  "type": "Expression"
+                }
+              },
+              "externalReferences": {
+                "connection": "00000000-0000-0000-0000-000000000000"
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "log warehouse creation",
+              "dependsOn": [
+                {
+                  "activity": "Set wh-id from Create",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "name": "Does DW Exist",
+        "dependsOn": [
+          {
+            "activity": "Check Warehouse Existence",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "SetVariable",
+        "typeProperties": {
+          "variableName": "service_principal_id",
+          "value": {
+            "value": "@activity('Config').output.firstRow.SP_ClientID",
+            "type": "Expression"
+          }
+        },
+        "policy": {
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Set service principal",
+        "dependsOn": [
+          {
+            "activity": "Config",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "SetVariable",
+        "typeProperties": {
+          "variableName": "devops_provisioning_pipeline_id",
+          "value": {
+            "value": "@activity('Config').output.firstRow.DevOpsPipelineId",
+            "type": "Expression"
+          }
+        },
+        "policy": {
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Set devops pipeline id",
+        "dependsOn": [
+          {
+            "activity": "Set service principal",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "WebActivity",
+        "typeProperties": {
+          "method": "POST",
+          "relativeUrl": {
+            "value": "pipelines/@{variables('devops_provisioning_pipeline_id')}/runs?api-version=7.1",
+            "type": "Expression"
+          },
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body": {
+            "value": "{\"templateParameters\":{\"tenantId\":\"@{pipeline().parameters.tenantid}\",\"sqlServer\":\"@{activity('Get Connection String').output.connectionString}\"}}",
+            "type": "Expression"
+          }
+        },
+        "externalReferences": {
+          "connection": "00000000-0000-0000-0000-000000000000"
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Deploy DB to Tenant WH",
+        "dependsOn": [
+          {
+            "activity": "Get Connection String",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "WebActivity",
+        "typeProperties": {
+          "method": "GET",
+          "relativeUrl": {
+            "value": "workspaces/@{variables('workspaceId')}/warehouses/@{variables('warehouseId')}/connectionString",
+            "type": "Expression"
+          },
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body": {
+            "value": "@concat(\n'{',\n'\"displayName\":\"ws_', pipeline().parameters.tenantid, '\",',\n'\"capacityId\":\"', pipeline().parameters.capacityId, '\"',\n'}'\n)",
+            "type": "Expression"
+          }
+        },
+        "externalReferences": {
+          "connection": "00000000-0000-0000-0000-000000000000"
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Get Connection String",
+        "dependsOn": [
+          {
+            "activity": "Does DW Exist",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Until",
+        "typeProperties": {
+          "expression": {
+            "value": "@equals(variables('devops_state'), 'completed')",
+            "type": "Expression"
+          },
+          "timeout": "0.12:00:00",
+          "activities": [
+            {
+              "type": "Wait",
+              "typeProperties": {
+                "waitTimeInSeconds": 30
+              },
+              "name": "Wait 30s",
+              "dependsOn": []
+            },
+            {
+              "type": "WebActivity",
+              "typeProperties": {
+                "method": "GET",
+                "relativeUrl": {
+                  "value": "pipelines/@{variables('devops_provisioning_pipeline_id')}/runs/@{variables('devops_run_id')}?api-version=7.1",
+                  "type": "Expression"
+                },
+                "headers": {}
+              },
+              "externalReferences": {
+                "connection": "00000000-0000-0000-0000-000000000000"
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Check Run Status",
+              "dependsOn": [
+                {
+                  "activity": "Wait 30s",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "SetVariable",
+              "typeProperties": {
+                "variableName": "devops_result",
+                "value": {
+                  "value": "@if(\n    equals(activity('Check Run Status').output.state, 'completed'),\n    activity('Check Run Status').output.result,''\n)",
+                  "type": "Expression"
+                }
+              },
+              "policy": {
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Set devops_result loop",
+              "dependsOn": [
+                {
+                  "activity": "Check Run Status",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "SetVariable",
+              "typeProperties": {
+                "variableName": "devops_state",
+                "value": {
+                  "value": "@activity('Check Run Status').output.state",
+                  "type": "Expression"
+                }
+              },
+              "policy": {
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Set devops_state loop",
+              "dependsOn": [
+                {
+                  "activity": "Set devops_result loop",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "name": "Wait for DB Deployment",
+        "dependsOn": [
+          {
+            "activity": "Set devops_result",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "SetVariable",
+        "typeProperties": {
+          "variableName": "devops_run_id",
+          "value": {
+            "value": "@string(activity('Deploy DB to Tenant WH').output.id)",
+            "type": "Expression"
+          }
+        },
+        "policy": {
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Set devops_run_id",
+        "dependsOn": [
+          {
+            "activity": "Deploy DB to Tenant WH",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "SetVariable",
+        "typeProperties": {
+          "variableName": "devops_state",
+          "value": {
+            "value": "@string(activity('Deploy DB to Tenant WH').output.state)",
+            "type": "Expression"
+          }
+        },
+        "policy": {
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Set devops_state",
+        "dependsOn": [
+          {
+            "activity": "Set devops_run_id",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "SetVariable",
+        "typeProperties": {
+          "variableName": "devops_result",
+          "value": {
+            "value": "'in-progress'",
+            "type": "Expression"
+          }
+        },
+        "policy": {
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Set devops_result",
+        "dependsOn": [
+          {
+            "activity": "Set devops_state",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "IfCondition",
+        "typeProperties": {
+          "expression": {
+            "value": "@equals(variables('devops_result'),'succeeded')",
+            "type": "Expression"
+          },
+          "ifTrueActivities": [
+            {
+              "type": "TridentNotebook",
+              "typeProperties": {
+                "notebookId": "00000000-0000-0000-0000-000000000000",
+                "workspaceId": "00000000-0000-0000-0000-000000000000",
+                "parameters": {
+                  "TenantId": {
+                    "value": {
+                      "value": "@pipeline().parameters.tenantid",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  },
+                  "TenantName": {
+                    "value": {
+                      "value": "@pipeline().parameters.tenantName",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  },
+                  "CapacityId": {
+                    "value": {
+                      "value": "@pipeline().parameters.capacityId",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  },
+                  "ConnectionId": {
+                    "value": {
+                      "value": "@pipeline().parameters.connectionid",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  },
+                  "WorkspaceId": {
+                    "value": {
+                      "value": "@variables('workspaceId')",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  },
+                  "WarehouseId": {
+                    "value": {
+                      "value": "@variables('warehouseId')",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  },
+                  "ConnectionString": {
+                    "value": {
+                      "value": "@activity('Get Connection String').output.connectionString",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  }
+                }
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Add Tenant to Registry",
+              "dependsOn": []
+            },
+            {
+              "type": "WebActivity",
+              "typeProperties": {
+                "method": "POST",
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "body": {
+                  "value": "{\n    \"run_id\": \"@{pipeline().RunId}\",\n    \"tenant_id\": \"@{pipeline().parameters.tenantid}\",\n    \"event_type\": \"TENANT_PROVISIONING_SUCCESS\",\n    \"component\": \"provisioning\",\n    \"details\": \"Workspace_id: @{variables('workspaceId')}, WorkspaceName: @{variables('wsdisplayName')}, tenant provisioning succeeded\",\n    \"status\": \"SUCCESS\",\n    \"message\": \"Workspace created successfully\",\n    \"duration_seconds\": 0\n}",
+                  "type": "Expression"
+                }
+              },
+              "externalReferences": {
+                "connection": "00000000-0000-0000-0000-000000000000"
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "log tenant creation success",
+              "dependsOn": [
+                {
+                  "activity": "Add Tenant to Registry",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            }
+          ],
+          "ifFalseActivities": [
+            {
+              "type": "WebActivity",
+              "typeProperties": {
+                "method": "POST",
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "body": {
+                  "value": "{\n    \"run_id\": \"@{pipeline().RunId}\",\n    \"tenant_id\": \"@{pipeline().parameters.tenantid}\",\n    \"event_type\": \"TENANT_PROVISIONING_FAILED\",\n    \"component\": \"provisioning\",\n    \"details\": \"Workspace_id: @{variables('workspaceId')}, WorkspaceName: @{variables('wsdisplayName')}, check deployment logs\",\n    \"status\": \"SUCCESS\",\n    \"message\": \"Workspace created successfully\",\n    \"duration_seconds\": 0\n}",
+                  "type": "Expression"
+                }
+              },
+              "externalReferences": {
+                "connection": "00000000-0000-0000-0000-000000000000"
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "log tenant creation failure",
+              "dependsOn": []
+            }
+          ]
+        },
+        "name": "Successful Deployment",
+        "dependsOn": [
+          {
+            "activity": "Wait for DB Deployment",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Lookup",
+        "typeProperties": {
+          "source": {
+            "type": "DataWarehouseSource",
+            "sqlReaderQuery": "SELECT\n    MAX(CASE WHEN config_key = 'SP_ClientID'\n        THEN config_value END) AS SP_ClientID,\n    MAX(CASE WHEN config_key = 'devops_provisioning_pipeline_id'\n        THEN config_value END) AS DevOpsPipelineId\nFROM control.config\nWHERE Environment = '@{pipeline().parameters.Environment}'",
+            "partitionOption": "None",
+            "queryTimeout": "02:00:00"
+          },
+          "datasetSettings": {
+            "type": "DataWarehouseTable",
+            "schema": [],
+            "connectionSettings": {
+              "name": "00000000_0000_0000_0000_000000000000",
+              "properties": {
+                "type": "DataWarehouse",
+                "typeProperties": {
+                  "artifactId": "@pipeline().parameters.core_warehouseid",
+                  "endpoint": "@pipeline().parameters.core_sqlconnstring",
+                  "workspaceId": "@pipeline().parameters.core_workspaceid"
+                },
+                "externalReferences": {
+                  "connection": "@pipeline().parameters.core_connectionid"
+                },
+                "annotations": []
+              }
+            },
+            "annotations": []
+          }
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Config",
+        "dependsOn": []
+      }
+    ],
+    "parameters": {
+      "tenantid": {
+        "type": "string",
+        "defaultValue": "tenant8"
+      },
+      "capacityId": {
+        "type": "string",
+        "defaultValue": "00000000-0000-0000-0000-000000000000"
+      },
+      "connectionid": {
+        "type": "string",
+        "defaultValue": "00000000-0000-0000-0000-000000000000"
+      },
+      "tenantName": {
+        "type": "string",
+        "defaultValue": "Tenant 8"
+      },
+      "Environment": {
+        "type": "string",
+        "defaultValue": "DEV"
+      },
+      "core_connectionid": {
+        "type": "string",
+        "defaultValue": "00000000-0000-0000-0000-000000000000"
+      },
+      "core_workspaceid": {
+        "type": "string",
+        "defaultValue": "00000000-0000-0000-0000-000000000000"
+      },
+      "core_warehouseid": {
+        "type": "string",
+        "defaultValue": "00000000-0000-0000-0000-000000000000"
+      },
+      "core_sqlconnstring": {
+        "type": "string",
+        "defaultValue": "sample-sql-endpoint.datawarehouse.fabric.microsoft.com"
+      }
+    },
+    "variables": {
+      "workspaceId": {
+        "type": "String"
+      },
+      "warehouseId": {
+        "type": "String"
+      },
+      "connectionString": {
+        "type": "String"
+      },
+      "workspaceExists": {
+        "type": "Boolean"
+      },
+      "warehouseExists": {
+        "type": "Boolean"
+      },
+      "wsdisplayName": {
+        "type": "String"
+      },
+      "service_principal_id": {
+        "type": "String"
+      },
+      "devops_provisioning_pipeline_id": {
+        "type": "String"
+      },
+      "devops_run_id": {
+        "type": "String"
+      },
+      "devops_state": {
+        "type": "String"
+      },
+      "devops_result": {
+        "type": "String",
+        "defaultValue": "in-progress"
+      }
+    }
+  }
+}
